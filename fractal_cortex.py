@@ -18,6 +18,10 @@ from typing import Optional, Tuple, List
 import math
 
 
+# Constants
+EPSILON = 1e-9  # Small constant to prevent log(0) in entropy calculation
+
+
 class VicTorchAttention(nn.Module):
     """
     Vic-Torch: A custom attention mechanism with vision-inspired improvements.
@@ -78,7 +82,7 @@ class VicTorchAttention(nn.Module):
         # Self-awareness: compute and track attention entropy
         if self.training:
             with torch.no_grad():
-                entropy = -torch.sum(attn * torch.log(attn + 1e-9), dim=-1).mean()
+                entropy = -torch.sum(attn * torch.log(attn + EPSILON), dim=-1).mean()
                 self.attention_entropy = (self.attention_entropy * self.attention_count + entropy) / (self.attention_count + 1)
                 self.attention_count += 1
         
@@ -113,10 +117,12 @@ class FractalBlock(nn.Module):
         mlp_ratio: float = 4.0,
         dropout: float = 0.0,
         depth: int = 1,
+        recursive_blend_ratio: float = 0.5,
     ):
         super().__init__()
         self.depth = depth
         self.dim = dim
+        self.recursive_blend_ratio = recursive_blend_ratio
         
         # Normalization layers
         self.norm1 = nn.LayerNorm(dim)
@@ -148,6 +154,7 @@ class FractalBlock(nn.Module):
                 mlp_ratio=mlp_ratio,
                 dropout=dropout,
                 depth=depth - 1,
+                recursive_blend_ratio=recursive_blend_ratio,
             )
         else:
             self.sub_block = None
@@ -174,7 +181,8 @@ class FractalBlock(nn.Module):
         # Recursive pathway: Apply sub-block if it exists
         if self.sub_block is not None:
             x_sub, sub_attns = self.sub_block(x)
-            x = 0.5 * x + 0.5 * x_sub  # Blend main and recursive pathways
+            # Blend main and recursive pathways
+            x = (1 - self.recursive_blend_ratio) * x + self.recursive_blend_ratio * x_sub
             attention_maps.extend(sub_attns)
         
         # MLP pathway
@@ -206,6 +214,7 @@ class FractalStack(nn.Module):
         mlp_ratio: float = 4.0,
         dropout: float = 0.1,
         fractal_depth: int = 2,
+        recursive_blend_ratio: float = 0.5,
     ):
         super().__init__()
         self.dim = dim
@@ -220,6 +229,7 @@ class FractalStack(nn.Module):
                 mlp_ratio=mlp_ratio,
                 dropout=dropout,
                 depth=fractal_depth,
+                recursive_blend_ratio=recursive_blend_ratio,
             )
             for _ in range(num_blocks)
         ])
@@ -275,6 +285,7 @@ class FractalCortex(nn.Module):
         fractal_depth: int = 2,
         max_seq_len: int = 512,
         num_classes: Optional[int] = None,
+        recursive_blend_ratio: float = 0.5,
     ):
         """
         Initialize FractalCortex.
@@ -288,6 +299,7 @@ class FractalCortex(nn.Module):
             fractal_depth: Depth of recursive fractal structure
             max_seq_len: Maximum sequence length
             num_classes: Number of output classes (None for feature extraction)
+            recursive_blend_ratio: Ratio for blending main and recursive pathways (0.5 = equal blend)
         """
         super().__init__()
         self.input_dim = input_dim
@@ -305,6 +317,7 @@ class FractalCortex(nn.Module):
             mlp_ratio=mlp_ratio,
             dropout=dropout,
             fractal_depth=fractal_depth,
+            recursive_blend_ratio=recursive_blend_ratio,
         )
         
         # Classification head (if needed)
